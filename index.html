@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audacy Seattle Creative Project Intake</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .loader {
+      width: 15px;
+      aspect-ratio: 1;
+      position: relative;
+    }
+    .loader:before, .loader:after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: #e5e7eb;
+      animation: l4 2s infinite cubic-bezier(0.61, 0.28, 0.73, 0.81);
+    }
+    .loader:after {
+      animation-delay: 1s;
+    }
+    @keyframes l4 {
+      0% {
+        transform: scale(0.95);
+        opacity: 0.5;
+      }
+      50% {
+        transform: scale(1.1);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(0.95);
+        opacity: 0.5;
+      }
+    }
+    .dot-flashing {
+      position: relative;
+      width: 10px;
+      height: 10px;
+      border-radius: 5px;
+      background-color: #9ca3af;
+      color: #9ca3af;
+      animation: dotFlashing 1s infinite linear alternate;
+      animation-delay: 0.5s;
+    }
+    .dot-flashing::before, .dot-flashing::after {
+      content: '';
+      display: inline-block;
+      position: absolute;
+      top: 0;
+    }
+    .dot-flashing::before {
+      left: -15px;
+      width: 10px;
+      height: 10px;
+      border-radius: 5px;
+      background-color: #9ca3af;
+      color: #9ca3af;
+      animation: dotFlashing 1s infinite linear alternate;
+      animation-delay: 0s;
+    }
+    .dot-flashing::after {
+      left: 15px;
+      width: 10px;
+      height: 10px;
+      border-radius: 5px;
+      background-color: #9ca3af;
+      color: #9ca3af;
+      animation: dotFlashing 1s infinite linear alternate;
+      animation-delay: 1s;
+    }
+    @keyframes dotFlashing {
+      0% {
+        background-color: #9ca3af;
+      }
+      50%, 100% {
+        background-color: #e5e7eb;
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+  <div id="root" class="w-full max-w-3xl h-[80vh] flex flex-col bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-200"></div>
+
+  <!-- React and Babel for JSX -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInWithCustomToken, onAuthStateChanged, signInAnonymously, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, addDoc, onSnapshot, collection, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    window.firebase = { initializeApp, getAuth, signInWithCustomToken, onAuthStateChanged, signInAnonymously, GoogleAuthProvider, signInWithPopup, signOut, getFirestore, addDoc, onSnapshot, collection, query, orderBy, serverTimestamp };
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { initializeApp, getAuth, signInWithCustomToken, onAuthStateChanged, signInAnonymously, GoogleAuthProvider, signInWithPopup, signOut, getFirestore, addDoc, onSnapshot, collection, query, orderBy, serverTimestamp } = window.firebase;
+
+    // Define the questions for the form, including type and options for multiple-choice questions.
+    const questions = [
+      { key: 'customerName', prompt: 'Hello! I can help you submit a new creative project request. First, what is your name?', type: 'text' },
+      { key: 'customerEmail', prompt: 'Thanks, {customerName}. What is your email address?', type: 'text' },
+      { key: 'projectName', prompt: 'What is the name of this project?', type: 'text' },
+      { key: 'projectDescription', prompt: 'Please tell me in a few sentences what the project is about and what you hope to achieve.', type: 'text' },
+      { key: 'projectDeadline', prompt: 'What is the deadline for this project?', type: 'text' },
+      { key: 'targetAudience', prompt: 'Who is the target audience for this creative?', type: 'text' },
+      { key: 'keyMessages', prompt: 'What are the key messages you need to communicate?', type: 'text' },
+      { key: 'deliverables', prompt: 'What kind of deliverables do you need?', type: 'options', options: ['Audio Spot', 'Video', 'Social Media Graphic', 'Print Ad', 'Event Branding', 'Other'] },
+      { key: 'budget', prompt: 'Do you have a budget allocated for this project?', type: 'text' },
+      { key: 'additionalNotes', prompt: 'Is there anything else we should know?', type: 'text' }
+    ];
+
+    // Helper function to replace a placeholder in a string
+    const replacePlaceholder = (text, key, value) => {
+      if (!text) return '';
+      return text.replace(new RegExp(`{${key}}`, 'g'), value);
+    };
+
+    const App = () => {
+      // Application state management
+      const [currentStep, setCurrentStep] = useState(0);
+      const [answers, setAnswers] = useState({});
+      const [conversation, setConversation] = useState([]);
+      const [input, setInput] = useState('');
+      const [isAuthReady, setIsAuthReady] = useState(false);
+      const [userRequests, setUserRequests] = useState([]);
+      const messagesEndRef = useRef(null);
+
+      // Firebase state
+      const [db, setDb] = useState(null);
+      const [auth, setAuth] = useState(null);
+      const [userId, setUserId] = useState(null);
+      const [userName, setUserName] = useState('');
+      const [userEmail, setUserEmail] = useState('');
+
+      // Function to scroll to the bottom of the chat
+      const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      };
+
+      // 1. Initialize Firebase and authenticate the user
+      useEffect(() => {
+        // NOTE: Replace these with your actual Firebase config
+        const firebaseConfig = {
+          apiKey: "AIzaSyDpsr49JiEJw4Ek4RSiTHWBlmiBHv-BPgg",
+          authDomain: "audacy-seattle-ad-projects.firebaseapp.com",
+          projectId: "audacy-seattle-ad-projects",
+          storageBucket: "audacy-seattle-ad-projects.firebasestorage.app",
+          messagingSenderId: "545356284219",
+          appId: "1:545356284219:web:1914c72480e304705e771e"
+        };
+        const app = initializeApp(firebaseConfig);
+        const firestoreDb = getFirestore(app);
+        const firebaseAuth = getAuth(app);
+
+        setDb(firestoreDb);
+        setAuth(firebaseAuth);
+
+        // Listen for auth state changes to get the user ID
+        const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
+          if (user) {
+            setUserId(user.uid);
+            setUserName(user.displayName || '');
+            setUserEmail(user.email || '');
+            console.log("User authenticated:", user.uid);
+          } else {
+            setUserId(null);
+            setUserName('');
+            setUserEmail('');
+            console.log("User is not authenticated.");
+          }
+          setIsAuthReady(true);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      // 2. Load the user's past requests from Firestore
+      useEffect(() => {
+        // Only fetch data if auth is ready and we have a user ID
+        if (!isAuthReady || !db || !userId) return;
+
+        const requestsCollectionRef = collection(db, 'requests');
+        
+        // Create a query to get requests from the current user, ordered by date
+        const q = query(requestsCollectionRef, orderBy('createdAt', 'desc'));
+
+        // Set up a real-time listener for the requests
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          const requests = [];
+          snapshot.forEach(doc => {
+            requests.push({ id: doc.id, ...doc.data() });
+          });
+          setUserRequests(requests);
+        }, (error) => {
+          console.error("Error fetching requests:", error);
+        });
+
+        // Clean up the listener on component unmount
+        return () => unsubscribe();
+      }, [isAuthReady, db, userId]);
+
+      // 3. Handle conversation flow and autoscroll
+      useEffect(() => {
+        if (conversation.length === 0 && currentStep < questions.length && userId) {
+          const firstPrompt = replacePlaceholder(questions[0].prompt, 'customerName', userName);
+          const newConversation = [{ role: 'gemini', text: firstPrompt }];
+          if (userName) {
+            newConversation.push({ role: 'user', text: userName });
+            const secondPrompt = replacePlaceholder(questions[1].prompt, 'customerName', userName);
+            newConversation.push({ role: 'gemini', text: secondPrompt });
+          }
+          if (userEmail) {
+            newConversation.push({ role: 'user', text: userEmail });
+          }
+          
+          setConversation(newConversation);
+          
+          // Auto-populate answers with user profile data
+          if (userName) setAnswers(prev => ({ ...prev, customerName: userName }));
+          if (userEmail) setAnswers(prev => ({ ...prev, customerEmail: userEmail }));
+          
+          if (userName && userEmail) {
+            // If both fields are populated, move to the next question
+            setCurrentStep(2);
+          } else if (userName) {
+            // If only name is populated, move to the email question
+            setCurrentStep(1);
+          } else {
+            // Otherwise, stay on the first question
+            setCurrentStep(0);
+          }
+        }
+      }, [userId, userName, userEmail]);
+
+      useEffect(() => {
+        scrollToBottom();
+      }, [conversation]);
+
+      // Function to save the completed request to Firestore
+      const saveRequest = async (requestData) => {
+        if (!db || !userId) {
+          console.error("Database or user not ready. Cannot save request.");
+          return;
+        }
+        const requestsCollectionRef = collection(db, 'requests');
+        try {
+          await addDoc(requestsCollectionRef, {
+            ...requestData,
+            userId: userId,
+            createdAt: serverTimestamp(),
+          });
+          console.log("Request successfully saved to Firestore.");
+        } catch (e) {
+          console.error("Error adding document: ", e);
+        }
+      };
+
+      // The main submission handler for both text and options
+      const handleSubmit = async (answer) => {
+        const currentQuestion = questions[currentStep];
+        const newAnswers = { ...answers, [currentQuestion.key]: answer };
+        setAnswers(newAnswers);
+
+        setConversation(prev => [...prev, { role: 'user', text: answer }]);
+
+        const nextStep = currentStep + 1;
+        if (nextStep >= questions.length) {
+          await saveRequest(newAnswers);
+          setCurrentStep(questions.length);
+        } else {
+          const nextQuestion = questions[nextStep];
+          const nextPrompt = replacePlaceholder(nextQuestion.prompt, 'customerName', newAnswers.customerName);
+          setConversation(prev => [...prev, { role: 'gemini', text: nextPrompt }]);
+          setCurrentStep(nextStep);
+        }
+        setInput('');
+      };
+
+      // Handle text input submission
+      const handleTextInputSubmit = (e) => {
+        e.preventDefault();
+        if (!input.trim()) return;
+        handleSubmit(input);
+      };
+
+      // Handle starting over from the beginning
+      const handleStartOver = () => {
+        setCurrentStep(0);
+        setAnswers({});
+        const firstPrompt = replacePlaceholder(questions[0].prompt, 'customerName', userName);
+        const newConversation = [{ role: 'gemini', text: firstPrompt }];
+        if (userName) {
+          newConversation.push({ role: 'user', text: userName });
+          const secondPrompt = replacePlaceholder(questions[1].prompt, 'customerName', userName);
+          newConversation.push({ role: 'gemini', text: secondPrompt });
+        }
+        if (userEmail) {
+          newConversation.push({ role: 'user', text: userEmail });
+        }
+        setConversation(newConversation);
+        if (userName && userEmail) {
+          setCurrentStep(2);
+        } else if (userName) {
+          setCurrentStep(1);
+        } else {
+          setCurrentStep(0);
+        }
+        setInput('');
+      };
+
+      // Handle loading a previous request to populate the form
+      const handleLoadRequest = (request) => {
+        setAnswers(request);
+        setCurrentStep(0);
+        setInput('');
+        setConversation([
+          { role: 'gemini', text: "Welcome back! I've loaded your previous request. You can edit the answers below, or just click through." },
+          { role: 'gemini', text: replacePlaceholder(questions[0].prompt, 'customerName', request.customerName) }
+        ]);
+      };
+
+      // Handle Google Sign-In
+      const handleGoogleSignIn = async () => {
+        if (!auth) return;
+        const provider = new GoogleAuthProvider();
+        try {
+          await signInWithPopup(auth, provider);
+        } catch (error) {
+          console.error("Google sign-in failed:", error);
+          if (error.code === 'auth/popup-closed-by-user') {
+            alert('Sign-in process was canceled. Please try again.');
+          } else if (error.code === 'auth/cancelled-popup-request') {
+             alert('A sign-in pop-up was already open. Please close it and try again.');
+          }
+        }
+      };
+
+      // Handle Sign-Out
+      const handleSignOut = async () => {
+        if (!auth) return;
+        try {
+          await signOut(auth);
+          // Reset state on sign out
+          setAnswers({});
+          setConversation([]);
+          setCurrentStep(0);
+          setInput('');
+          console.log("User signed out.");
+        } catch (error) {
+          console.error("Sign out failed:", error);
+        }
+      };
+      
+      // The main chat interface
+      const renderChat = () => {
+        if (!userId) {
+          return (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+              <p className="text-gray-600 mb-6 text-xl">
+                Please sign in to start a new project request.
+              </p>
+              <button
+                onClick={handleGoogleSignIn}
+                className="px-6 py-3 bg-white text-gray-700 font-semibold rounded-full shadow-lg hover:bg-gray-100 transition-colors duration-200 flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12.24 10.25c.16 0 .32.02.48.04l2.58-2.58a8.98 8.98 0 0 0-1.8-1.55c-.75-.46-1.57-.84-2.42-1.12C10.27 4.7 9.53 4.54 8.79 4.43c-.88-.13-1.77-.18-2.66-.18a9 9 0 0 0-6.19 15.69l2.57-2.58a5.95 5.95 0 0 1 3.62 1.25 5.95 5.95 0 0 1 2.37-3.83c.96-1.1 2.2-1.77 3.66-2.03-1.25-.19-2.54-.15-3.82-.01l-2.57 2.58a6 6 0 0 1-2.91-1.35 6 6 0 0 1-2.04-2.46l-2.57 2.58a9 9 0 0 0 15.68-.01L12.24 10.25zM12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" clipRule="evenodd"/>
+                </svg>
+                Sign in with Google
+              </button>
+            </div>
+          );
+        }
+        
+        const currentQuestion = questions[currentStep];
+
+        return (
+          <>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {conversation.map((message, index) => (
+                <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`p-3 rounded-xl max-w-sm shadow-md ${message.role === 'user' ? 'bg-indigo-500 text-white rounded-br-none' : 'bg-gray-200 text-gray-800 rounded-bl-none'}`}>
+                    <p>{replacePlaceholder(message.text, 'customerName', answers.customerName)}</p>
+                  </div>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="p-4 flex flex-col gap-4">
+              <div className="flex justify-center">
+                {currentQuestion.type === 'options' && (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {currentQuestion.options.map((option, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handleSubmit(option)}
+                        className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-full font-medium shadow-sm hover:bg-indigo-200 transition-colors duration-200"
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {currentQuestion.type === 'text' && (
+                <form onSubmit={handleTextInputSubmit} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Type your answer here..."
+                    className="flex-1 p-3 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!input.trim()}
+                    className="p-3 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-all duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+                      <path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.981.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" />
+                    </svg>
+                  </button>
+                </form>
+              )}
+            </div>
+          </>
+        );
+      };
+
+      // The summary screen at the end
+      const renderSummary = () => (
+        <div className="flex-1 p-8 space-y-6 overflow-y-auto">
+          <h2 className="text-3xl font-bold text-gray-800 mb-4">Project Details Summary</h2>
+          <p className="text-lg text-gray-600">
+            Thank you! The information below has been saved. You can copy it or start a new request.
+          </p>
+
+          <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+            <div className="space-y-4">
+              {Object.entries(answers).map(([key, value]) => (
+                <div key={key} className="flex items-start">
+                  <span className="font-semibold text-gray-700 w-48 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}:</span>
+                  <span className="flex-1 text-gray-600">{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div className="flex flex-col items-center mt-6 space-y-4">
+            <button
+              onClick={handleStartOver}
+              className="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 transition-colors duration-200"
+            >
+              Start a New Request
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="w-full sm:w-auto px-6 py-3 bg-gray-500 text-white font-semibold rounded-full shadow-lg hover:bg-gray-600 transition-colors duration-200"
+            >
+              Sign Out
+            </button>
+          </div>
+
+          {userRequests.length > 0 && (
+            <div className="mt-8">
+              <h3 className="text-xl font-bold text-gray-800 mb-4">Past Requests</h3>
+              <p className="text-sm text-gray-600 mb-4">Click a past request to start a new form with the old answers filled in.</p>
+              <div className="space-y-2">
+                {userRequests.map((req) => (
+                  <button
+                    key={req.id}
+                    onClick={() => handleLoadRequest(req)}
+                    className="w-full text-left p-4 bg-gray-100 rounded-lg shadow-sm hover:bg-gray-200 transition-colors duration-200 flex flex-col sm:flex-row justify-between items-start sm:items-center"
+                  >
+                    <span className="font-medium text-gray-700">
+                      {req.projectName || 'Unnamed Project'} - {req.projectDescription ? `${req.projectDescription.substring(0, 50)}...` : 'No Description'}
+                    </span>
+                    <span className="text-sm text-gray-500 mt-1 sm:mt-0 sm:ml-4">
+                      {req.createdAt?.seconds ? new Date(req.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      return (
+        <div className="font-sans flex items-center justify-center min-h-screen bg-gray-100 p-4">
+          <div className="w-full max-w-3xl h-[80vh] flex flex-col bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-200">
+            <header className="p-4 bg-indigo-600 text-white text-center rounded-t-2xl shadow-inner">
+              <h1 className="text-2xl font-bold">Audacy Seattle Creative Project Intake</h1>
+              <p className="text-sm opacity-80">Let's get the details for your new project.</p>
+            </header>
+            {isAuthReady ? (currentStep < questions.length ? renderChat() : renderSummary()) : (
+              <div className="flex-1 flex items-center justify-center text-gray-500">
+                <div className="loader"></div>
+                <p className="ml-4 text-lg">Loading...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
